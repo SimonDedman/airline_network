@@ -451,15 +451,34 @@ function drawConnections() {
     // Purple connection marker
     const isPinned = state.pinned.has(vIATA);
     const marker = L.circleMarker([vApt.la, vApt.lo], {
-      radius: 6,
+      radius: isPinned ? 8 : 6,
       color: isPinned ? '#d946ef' : '#a855f7',
       fillColor: isPinned ? '#d946ef' : '#a855f7',
       fillOpacity: 0.9, weight: isPinned ? 2 : 1,
     });
     marker.bindTooltip(
-      `<b>Via ${vIATA}</b> — ${vApt.n}<br>${vApt.c}, ${vApt.co}<br><i>${isPinned ? 'Ctrl+click to unpin' : 'Click to pin details'}</i>`,
+      `<b>Via ${vIATA}</b> — ${vApt.n}<br>${vApt.c}, ${vApt.co}`,
       { sticky: true, direction: 'top' }
     );
+
+    // Build popup with inbound/outbound detail
+    const leg1Agg = aggByOrigin(leg1Routes);
+    const leg2Agg = aggByDest(leg2Routes);
+    let popupHtml = `<b>Via ${esc(vIATA)}</b> — ${esc(vApt.n)}<br>${esc(vApt.c)}, ${esc(vApt.co)}`;
+    popupHtml += isPinned ? '<br><b style="color:#d946ef">📍 Pinned</b>' : '';
+    popupHtml += '<hr style="margin:4px 0"><b>Inbound:</b>';
+    for (const leg of leg1Agg) {
+      const t = leg.mn ? ' ' + fmtTime(leg.mn) : '';
+      popupHtml += `<br>← ${leg.iata} (${leg.km}km${t}) ${esc(leg.alsStr)}`;
+    }
+    popupHtml += '<br><br><b>Onward:</b>';
+    for (const leg of leg2Agg) {
+      const t = leg.mn ? ' ' + fmtTime(leg.mn) : '';
+      popupHtml += `<br>→ ${leg.iata} (${leg.km}km${t}) ${esc(leg.alsStr)}`;
+    }
+    popupHtml += `<br><br><i>${isPinned ? 'Click to unpin' : 'Click to pin'}</i>`;
+    marker.bindPopup(popupHtml, { maxWidth: 350 });
+
     marker.on('click', (e) => handleViaClick(vIATA, e.originalEvent));
     layers.connections.addLayer(marker);
   }
@@ -567,13 +586,15 @@ function handleAirportClick(iata, evt) {
 }
 
 function handleViaClick(vIATA, evt) {
-  const ctrl = state.ctrlDown || evt.ctrlKey || evt.metaKey;
-  if (ctrl) {
+  // Toggle pin state
+  if (state.pinned.has(vIATA)) {
     state.pinned.delete(vIATA);
   } else {
     state.pinned.add(vIATA);
   }
-  redraw();
+  // Update report without full redraw (which would destroy the popup)
+  updateReport();
+  updateStatus();
   if (evt && evt.stopPropagation) evt.stopPropagation();
 }
 
