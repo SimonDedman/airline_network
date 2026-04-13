@@ -209,6 +209,7 @@ function initMap() {
   map = L.map('map', {
     preferCanvas: true,
     zoomControl: true,
+    worldCopyJump: true,
   }).setView([50, 10], 4);
 
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
@@ -328,7 +329,7 @@ function drawOriginRoutes() {
       if (drawnLines.has(key)) continue;
       drawnLines.add(key);
       const oApt = airports[oIATA];
-      L.polyline([[oApt.la, oApt.lo], [dApt.la, dApt.lo]], {
+      L.polyline(shortLine(oApt.la, oApt.lo, dApt.la, dApt.lo), {
         color: '#fbbf24', weight: 1.2, opacity: 0.35,
       }).addTo(layers.routesLeg1);
     }
@@ -431,7 +432,7 @@ function drawConnections() {
       drawnLeg1.add(key);
       const oApt = airports[r.or];
       if (!oApt) continue;
-      L.polyline([[oApt.la, oApt.lo], [vApt.la, vApt.lo]], {
+      L.polyline(shortLine(oApt.la, oApt.lo, vApt.la, vApt.lo), {
         color: '#fbbf24', weight: 1.5, opacity: 0.4,
       }).addTo(layers.routesLeg1);
     }
@@ -444,7 +445,7 @@ function drawConnections() {
       drawnLeg2.add(key);
       const dApt = airports[r.de];
       if (!dApt) continue;
-      L.polyline([[vApt.la, vApt.lo], [dApt.la, dApt.lo]], {
+      L.polyline(shortLine(vApt.la, vApt.lo, dApt.la, dApt.lo), {
         color: '#f97316', weight: 1.5, opacity: 0.4,
       }).addTo(layers.routesLeg2);
     }
@@ -602,6 +603,16 @@ function handleViaClick(vIATA, evt) {
 // ═══════════════════════════════════════════════════════
 //  Helpers
 // ═══════════════════════════════════════════════════════
+
+// Shortest-path polyline: adjust dest longitude to avoid wrapping
+// the long way around when crossing the antimeridian.
+function shortLine(lat1, lon1, lat2, lon2) {
+  let dLon = lon2 - lon1;
+  if (dLon > 180) lon2 -= 360;
+  else if (dLon < -180) lon2 += 360;
+  return [[lat1, lon1], [lat2, lon2]];
+}
+
 function fmtTime(mins) {
   if (!mins || mins === null || !isFinite(mins)) return '';
   const h = Math.floor(mins / 60);
