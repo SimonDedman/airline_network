@@ -58,7 +58,7 @@ routes_from <- function(con, origin, airline = NULL, europe = FALSE) {
     SELECT r.airline_iata, al.name AS airline_name,
            r.dest_iata, a.name AS dest_airport, a.city AS dest_city,
            a.country AS dest_country, a.continent AS dest_continent,
-           r.codeshare, r.stops, r.equipment
+           r.distance_km, r.flight_min
     FROM routes r
     LEFT JOIN airports a ON r.dest_iata = a.iata_code
     LEFT JOIN airlines al ON r.airline_iata = al.iata_code
@@ -85,7 +85,7 @@ routes_to <- function(con, dest, airline = NULL, europe = FALSE) {
     SELECT r.airline_iata, al.name AS airline_name,
            r.origin_iata, a.name AS origin_airport, a.city AS origin_city,
            a.country AS origin_country, a.continent AS origin_continent,
-           r.codeshare, r.stops, r.equipment
+           r.distance_km, r.flight_min
     FROM routes r
     LEFT JOIN airports a ON r.origin_iata = a.iata_code
     LEFT JOIN airlines al ON r.airline_iata = al.iata_code
@@ -119,7 +119,7 @@ connections <- function(con, from, to, europe_only = FALSE) {
            r.origin_iata, r.dest_iata,
            NULL AS via_iata, NULL AS via_city,
            'direct' AS route_type,
-           r.equipment
+           r.distance_km, r.flight_min
     FROM routes r
     LEFT JOIN airlines al ON r.airline_iata = al.iata_code
     WHERE r.origin_iata = ?1 AND r.dest_iata = ?2

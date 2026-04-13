@@ -17,10 +17,10 @@ Path: `db/airline_network.sqlite`
 **airlines** — ~1K active airlines
 - `iata_code` (PK-like), `icao_code`, `name`, `country`, `active`
 
-**routes** — ~67K airline routes
+**routes** — ~90K airline routes (weekly-updated via Jonty/airline-route-data)
 - `airline_iata`, `origin_iata`, `dest_iata`
-- `codeshare` (TRUE/FALSE), `stops` (usually 0), `equipment` (aircraft types)
-- `origin_known`, `dest_known` (whether both endpoints are in airports table)
+- `distance_km`, `flight_min` (flight duration in minutes)
+- `source` (currently "jonty" for all rows)
 
 ### Views
 
@@ -56,17 +56,23 @@ KIR (Kerry), WAT (Waterford — limited service)
 ## Data sources
 
 - **OurAirports** (airports): public domain, updated weekly
-- **OpenFlights** (routes, airlines): ODbL, route data frozen ~June 2014
-
-Route data is stale but structurally sound for identifying which
-airports connect to which. Major European routes (Ryanair, Aer Lingus,
-easyJet hubs) are well represented.
+- **Jonty/airline-route-data** (routes, airlines): GitHub, updated weekly
+  https://github.com/Jonty/airline-route-data
+- **OpenFlights** (legacy, still downloaded but superseded by Jonty)
 
 ## Rebuilding the database
 
 ```r
-source("R/01_download_data.R")  # downloads CSVs to data/
-source("R/02_build_database.R") # builds db/airline_network.sqlite
+source("scripts/01_download_data.R")   # downloads OurAirports CSVs
+source("scripts/04_ingest_jonty.R")    # downloads Jonty JSON + builds SQLite
 ```
 
-Requires: DBI, RSQLite, data.table, curl, here
+To refresh route data only (re-downloads if >7 days old):
+```r
+source("scripts/04_ingest_jonty.R")
+```
+
+Note: build scripts live in `scripts/`, not `R/`. Shiny 1.13+
+auto-sources everything in `R/` on app startup.
+
+Requires: DBI, RSQLite, data.table, jsonlite, curl, here
