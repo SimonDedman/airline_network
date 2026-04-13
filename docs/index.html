@@ -476,7 +476,7 @@ function drawConnections() {
       const t = leg.mn ? ' ' + fmtTime(leg.mn) : '';
       popupHtml += `<br>→ ${leg.iata} (${leg.km}km${t}) ${esc(leg.alsStr)}`;
     }
-    popupHtml += `<br><br><i>${isPinned ? 'Click to unpin' : 'Click to pin'}</i>`;
+    popupHtml += isPinned ? '<br><br><i>📍 Pinned! Click airport again to unpin</i>' : '';
     marker.bindPopup(popupHtml, { maxWidth: 350 });
 
     marker.on('click', (e) => handleViaClick(vIATA, e.originalEvent));
