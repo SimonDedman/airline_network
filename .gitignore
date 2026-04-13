@@ -1,0 +1,15 @@
+# Data files (downloaded from external sources)
+data/
+
+# SQLite database
+db/*.sqlite
+
+# R project files
+.Rproj.user/
+.Rhistory
+.RData
+.Rdata
+
+# OS
+.DS_Store
+Thumbs.db
