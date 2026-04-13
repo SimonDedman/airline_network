@@ -239,6 +239,32 @@ function buildIndexes() {
 // ═══════════════════════════════════════════════════════
 //  Airport markers (base layer — permanent)
 // ═══════════════════════════════════════════════════════
+// Place a circleMarker at canonical lon and ±360 so it appears on all
+// wrapped copies of the world map.
+const WORLD_OFFSETS = [-360, 0, 360];
+
+function addWrappedCircleMarker(layer, lat, lon, opts, tooltip, onClick) {
+  const markers = [];
+  for (const off of WORLD_OFFSETS) {
+    const m = L.circleMarker([lat, lon + off], opts);
+    if (tooltip) m.bindTooltip(tooltip, { sticky: true, direction: 'top' });
+    if (onClick) m.on('click', onClick);
+    layer.addLayer(m);
+    markers.push(m);
+  }
+  return markers;
+}
+
+function addWrappedPolyline(layer, lat1, lon1, lat2, lon2, opts) {
+  const coords = shortLine(lat1, lon1, lat2, lon2);
+  for (const off of WORLD_OFFSETS) {
+    L.polyline(
+      coords.map(([la, lo]) => [la, lo + off]),
+      opts
+    ).addTo(layer);
+  }
+}
+
 function addAirportMarkers() {
   const largeLayer  = L.layerGroup().addTo(map);
   const mediumLayer = L.layerGroup().addTo(map);
@@ -248,27 +274,16 @@ function addAirportMarkers() {
     const color   = isLarge ? '#2563eb' : '#94a3b8';
     const radius  = isLarge ? 5 : 3;
 
-    const marker = L.circleMarker([apt.la, apt.lo], {
-      radius,
-      color,
-      fillColor: color,
-      fillOpacity: 0.7,
-      weight: 1,
-      opacity: 0.9,
-    });
+    const opts = {
+      radius, color, fillColor: color,
+      fillOpacity: 0.7, weight: 1, opacity: 0.9,
+    };
+    const tip = `<b>${iata}</b> — ${apt.n}<br>${apt.c}, ${apt.co}`;
+    const onClick = (e) => handleAirportClick(iata, e.originalEvent);
+    const layer = isLarge ? largeLayer : mediumLayer;
 
-    marker.bindTooltip(`<b>${iata}</b> — ${apt.n}<br>${apt.c}, ${apt.co}`, {
-      sticky: true,
-      direction: 'top',
-      className: 'apt-tooltip',
-    });
-
-    marker.on('click', (e) => handleAirportClick(iata, e.originalEvent));
-
-    if (isLarge) largeLayer.addLayer(marker);
-    else mediumLayer.addLayer(marker);
-
-    airportMarkerMap.set(iata, marker);
+    const ms = addWrappedCircleMarker(layer, apt.la, apt.lo, opts, tip, onClick);
+    airportMarkerMap.set(iata, ms[1]); // canonical copy
   }
 }
 
@@ -290,10 +305,10 @@ function drawOriginRoutes() {
   for (const iata of origs) {
     const apt = airports[iata];
     if (!apt) continue;
-    L.circleMarker([apt.la, apt.lo], {
+    addWrappedCircleMarker(layers.originHighlight, apt.la, apt.lo, {
       radius: 8, color: '#fbbf24', fillColor: '#fbbf24',
       fillOpacity: 1, weight: 2,
-    }).addTo(layers.originHighlight);
+    });
   }
 
   // Collect all destinations reachable from any origin
@@ -329,9 +344,9 @@ function drawOriginRoutes() {
       if (drawnLines.has(key)) continue;
       drawnLines.add(key);
       const oApt = airports[oIATA];
-      L.polyline(shortLine(oApt.la, oApt.lo, dApt.la, dApt.lo), {
+      addWrappedPolyline(layers.routesLeg1, oApt.la, oApt.lo, dApt.la, dApt.lo, {
         color: '#fbbf24', weight: 1.2, opacity: 0.35,
-      }).addTo(layers.routesLeg1);
+      });
     }
   }
 
@@ -344,16 +359,11 @@ function drawOriginRoutes() {
     const origList = [...info.origins].join(', ');
     const timeStr  = fmtTime(info.minMn);
 
-    const marker = L.circleMarker([dApt.la, dApt.lo], {
+    const tip = `<b>${dIATA}</b> — ${dApt.n}<br>${dApt.c}, ${dApt.co}<br>${info.minKm} km${timeStr ? ' · ' + timeStr : ''}<br>From: ${origList}`;
+    addWrappedCircleMarker(layers.destMarkers, dApt.la, dApt.lo, {
       radius: 5, color: '#f97316', fillColor: '#f97316',
       fillOpacity: 0.8, weight: 1,
-    });
-    marker.bindTooltip(
-      `<b>${dIATA}</b> — ${dApt.n}<br>${dApt.c}, ${dApt.co}<br>${info.minKm} km${timeStr ? ' · ' + timeStr : ''}<br>From: ${origList}`,
-      { sticky: true, direction: 'top' }
-    );
-    marker.on('click', (e) => handleAirportClick(dIATA, e.originalEvent));
-    layers.destMarkers.addLayer(marker);
+    }, tip, (e) => handleAirportClick(dIATA, e.originalEvent));
   }
 }
 
@@ -369,20 +379,20 @@ function drawConnections() {
   for (const iata of origs) {
     const apt = airports[iata];
     if (!apt) continue;
-    L.circleMarker([apt.la, apt.lo], {
+    addWrappedCircleMarker(layers.originHighlight, apt.la, apt.lo, {
       radius: 9, color: '#fbbf24', fillColor: '#fbbf24',
       fillOpacity: 1, weight: 2,
-    }).addTo(layers.originHighlight);
+    });
   }
 
   // Orange destination highlights
   for (const iata of dests) {
     const apt = airports[iata];
     if (!apt) continue;
-    L.circleMarker([apt.la, apt.lo], {
+    addWrappedCircleMarker(layers.destHighlight, apt.la, apt.lo, {
       radius: 9, color: '#f97316', fillColor: '#f97316',
       fillOpacity: 1, weight: 2,
-    }).addTo(layers.destHighlight);
+    });
   }
 
   // Compute via airports
@@ -432,9 +442,9 @@ function drawConnections() {
       drawnLeg1.add(key);
       const oApt = airports[r.or];
       if (!oApt) continue;
-      L.polyline(shortLine(oApt.la, oApt.lo, vApt.la, vApt.lo), {
+      addWrappedPolyline(layers.routesLeg1, oApt.la, oApt.lo, vApt.la, vApt.lo, {
         color: '#fbbf24', weight: 1.5, opacity: 0.4,
-      }).addTo(layers.routesLeg1);
+      });
     }
 
     // Draw leg2 lines (orange): via → destination
@@ -445,23 +455,13 @@ function drawConnections() {
       drawnLeg2.add(key);
       const dApt = airports[r.de];
       if (!dApt) continue;
-      L.polyline(shortLine(vApt.la, vApt.lo, dApt.la, dApt.lo), {
+      addWrappedPolyline(layers.routesLeg2, vApt.la, vApt.lo, dApt.la, dApt.lo, {
         color: '#f97316', weight: 1.5, opacity: 0.4,
-      }).addTo(layers.routesLeg2);
+      });
     }
 
     // Purple connection marker
     const isPinned = state.pinned.has(vIATA);
-    const marker = L.circleMarker([vApt.la, vApt.lo], {
-      radius: isPinned ? 8 : 6,
-      color: isPinned ? '#d946ef' : '#a855f7',
-      fillColor: isPinned ? '#d946ef' : '#a855f7',
-      fillOpacity: 0.9, weight: isPinned ? 2 : 1,
-    });
-    marker.bindTooltip(
-      `<b>Via ${vIATA}</b> — ${vApt.n}<br>${vApt.c}, ${vApt.co}`,
-      { sticky: true, direction: 'top' }
-    );
 
     // Build popup with inbound/outbound detail
     const leg1Agg = aggByOrigin(leg1Routes);
@@ -479,10 +479,24 @@ function drawConnections() {
       popupHtml += `<br>→ ${leg.iata} (${leg.km}km${t}) ${esc(leg.alsStr)}`;
     }
     popupHtml += isPinned ? '<br><br><i>📍 Pinned! Click airport again to unpin</i>' : '';
-    marker.bindPopup(popupHtml, { maxWidth: 350 });
 
-    marker.on('click', (e) => handleViaClick(vIATA, e.originalEvent));
-    layers.connections.addLayer(marker);
+    const viaOpts = {
+      radius: isPinned ? 8 : 6,
+      color: isPinned ? '#d946ef' : '#a855f7',
+      fillColor: isPinned ? '#d946ef' : '#a855f7',
+      fillOpacity: 0.9, weight: isPinned ? 2 : 1,
+    };
+    const viaTip = `<b>Via ${vIATA}</b> — ${vApt.n}<br>${vApt.c}, ${vApt.co}`;
+    const viaClick = (e) => handleViaClick(vIATA, e.originalEvent);
+
+    // Add at all three world offsets
+    for (const off of WORLD_OFFSETS) {
+      const m = L.circleMarker([vApt.la, vApt.lo + off], viaOpts);
+      m.bindTooltip(viaTip, { sticky: true, direction: 'top' });
+      m.bindPopup(popupHtml, { maxWidth: 350 });
+      m.on('click', viaClick);
+      layers.connections.addLayer(m);
+    }
   }
 }
 
