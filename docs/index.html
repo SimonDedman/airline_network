@@ -228,10 +228,10 @@ function initMap() {
 function buildIndexes() {
   for (const arr of routes) {
     const r = { al: arr[0], or: arr[1], de: arr[2], km: arr[3], mn: arr[4] };
-    if (!routesByOrigin.has(or)) routesByOrigin.set(or, []);
-    routesByOrigin.get(or).push(r);
-    if (!routesByDest.has(de)) routesByDest.set(de, []);
-    routesByDest.get(de).push(r);
+    if (!routesByOrigin.has(r.or)) routesByOrigin.set(r.or, []);
+    routesByOrigin.get(r.or).push(r);
+    if (!routesByDest.has(r.de)) routesByDest.set(r.de, []);
+    routesByDest.get(r.de).push(r);
   }
 }
 
@@ -995,7 +995,7 @@ async function init() {
 
     airports = data.airports;
     airlines = data.airlines;
-    routes   = data.routes.map(([al, or, de, km, mn]) => ({ al, or, de, km, mn }));
+    routes   = data.routes.map(a => ({ al: a[0], or: a[1], de: a[2], km: a[3], mn: a[4] }));
 
     loadingMsg.textContent = 'Building indexes…';
     // Yield to browser between heavy operations
