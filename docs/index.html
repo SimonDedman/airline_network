@@ -226,8 +226,8 @@ function initMap() {
 //  Build indexes
 // ═══════════════════════════════════════════════════════
 function buildIndexes() {
-  for (const [al, or, de, km, mn] of routes) {
-    const r = { al, or, de, km, mn };
+  for (const arr of routes) {
+    const r = { al: arr[0], or: arr[1], de: arr[2], km: arr[3], mn: arr[4] };
     if (!routesByOrigin.has(or)) routesByOrigin.set(or, []);
     routesByOrigin.get(or).push(r);
     if (!routesByDest.has(de)) routesByDest.set(de, []);
