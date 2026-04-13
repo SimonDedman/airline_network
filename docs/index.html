@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Airline Network Explorer</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      overflow: hidden;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+    }
+
+    /* ── Info bar ── */
+    #info-bar {
+      height: 50px;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      background: #1e293b;
+      color: #f8fafc;
+      font-size: 14px;
+      gap: 12px;
+      flex-shrink: 0;
+      border-bottom: 1px solid #334155;
+      z-index: 1000;
+      position: relative;
+    }
+    #info-bar .title {
+      font-weight: 700;
+      font-size: 16px;
+      margin-right: auto;
+      white-space: nowrap;
+    }
+    #status-text { color: #94a3b8; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hint { color: #64748b; font-size: 12px; }
+    .sel-gold  { color: #fbbf24; font-weight: 600; }
+    .sel-orange{ color: #f97316; font-weight: 600; }
+
+    #btn-clear {
+      background: #475569; border: none; color: #f8fafc;
+      padding: 4px 12px; border-radius: 4px; cursor: pointer;
+      font-size: 12px; font-weight: 600; white-space: nowrap;
+      transition: background 0.15s;
+    }
+    #btn-clear:hover { background: #64748b; }
+
+    /* ── Main layout ── */
+    #main {
+      display: flex;
+      height: calc(100vh - 50px);
+    }
+
+    /* ── Map pane ── */
+    #map {
+      flex: 1;
+      min-width: 0;
+    }
+
+    /* ── Report pane ── */
+    #report-pane {
+      width: 380px;
+      flex-shrink: 0;
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid #334155;
+    }
+    #report-header {
+      padding: 8px 12px;
+      background: #1e293b;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #334155;
+      flex-shrink: 0;
+    }
+    #report-header .label { font-weight: 600; font-size: 13px; }
+    #btn-copy {
+      background: #7c3aed; border: none; color: white;
+      padding: 4px 12px; border-radius: 4px; cursor: pointer;
+      font-size: 12px; font-weight: 600;
+      transition: background 0.2s;
+    }
+    #btn-copy:hover { background: #6d28d9; }
+
+    #report-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px 12px;
+    }
+
+    /* ── Report content styles ── */
+    .r-dim       { color: #64748b; }
+    .r-summary   { color: #94a3b8; margin-bottom: 6px; }
+    .r-country   { color: #a855f7; font-weight: 700; margin-top: 8px; }
+    .r-via       { color: #a855f7; font-weight: 600; margin-top: 4px; }
+    .r-inbound   { color: #fbbf24; padding-left: 12px; }
+    .r-outbound  { color: #f97316; padding-left: 12px; }
+    .r-direct    { color: #22c55e; font-weight: 600; margin-top: 6px; }
+    .r-hr        { border: none; border-top: 1px solid #334155; margin: 8px 0; }
+    .r-pinned    { background: #1e293b; border-left: 2px solid #a855f7; padding: 6px 8px; margin: 4px 0; border-radius: 0 4px 4px 0; }
+    .r-pinned-hdr{ color: #a855f7; font-weight: 700; }
+    .r-sect-hdr  { font-weight: 700; color: #94a3b8; margin-top: 8px; }
+
+    /* ── Loading overlay ── */
+    #loading {
+      position: fixed; inset: 0;
+      background: #0f172a;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 9999;
+      gap: 16px;
+    }
+    #loading .spin {
+      width: 40px; height: 40px;
+      border: 3px solid #334155;
+      border-top-color: #fbbf24;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading p { color: #94a3b8; font-size: 14px; }
+
+    /* Scrollbar styling for report */
+    #report-body::-webkit-scrollbar { width: 6px; }
+    #report-body::-webkit-scrollbar-track { background: #0f172a; }
+    #report-body::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div id="loading">
+  <div class="spin"></div>
+  <p id="loading-msg">Loading route data…</p>
+</div>
+
+<!-- App shell (hidden until data loads) -->
+<div id="app" style="display:none; height:100vh; display:flex; flex-direction:column;">
+  <div id="info-bar">
+    <span class="title">Airline Network Explorer</span>
+    <span id="status-text"></span>
+    <button id="btn-clear">Clear</button>
+  </div>
+  <div id="main">
+    <div id="map"></div>
+    <div id="report-pane">
+      <div id="report-header">
+        <span class="label">Connection Report</span>
+        <button id="btn-copy">Copy Report</button>
+      </div>
+      <div id="report-body"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  State
+// ═══════════════════════════════════════════════════════
+const state = {
+  phase: 'idle',       // 'idle' | 'origins' | 'destinations'
+  origins: new Set(),
+  destinations: new Set(),
+  pinned: new Set(),   // pinned via-airport IATAs
+  ctrlDown: false,
+  reportText: '',
+};
+
+// ═══════════════════════════════════════════════════════
+//  Data (populated after fetch)
+// ═══════════════════════════════════════════════════════
+let airports = {};   // IATA → {n,c,co,ct,la,lo,t}
+let airlines = {};   // IATA → name
+let routes   = [];   // [{al,or,de,km,mn}]
+
+// Fast lookup indexes
+let routesByOrigin = new Map();  // origin IATA → [{al,or,de,km,mn}]
+let routesByDest   = new Map();  // dest   IATA → [{al,or,de,km,mn}]
+
+// ═══════════════════════════════════════════════════════
+//  Map setup
+// ═══════════════════════════════════════════════════════
+let map;
+const layers = {
+  originHighlight : null,
+  destHighlight   : null,
+  destMarkers     : null,
+  connections     : null,
+  routesLeg1      : null,
+  routesLeg2      : null,
+};
+
+// Leaflet circle marker layers — one per airport for click detection
+let airportMarkerMap = new Map(); // IATA → Leaflet marker
+
+function initMap() {
+  map = L.map('map', {
+    preferCanvas: true,
+    zoomControl: true,
+  }).setView([50, 10], 4);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap © CARTO',
+    subdomains: 'abcd',
+    maxZoom: 19,
+  }).addTo(map);
+
+  // Initialise overlay layer groups
+  for (const key of Object.keys(layers)) {
+    layers[key] = L.layerGroup().addTo(map);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Build indexes
+// ═══════════════════════════════════════════════════════
+function buildIndexes() {
+  for (const [al, or, de, km, mn] of routes) {
+    const r = { al, or, de, km, mn };
+    if (!routesByOrigin.has(or)) routesByOrigin.set(or, []);
+    routesByOrigin.get(or).push(r);
+    if (!routesByDest.has(de)) routesByDest.set(de, []);
+    routesByDest.get(de).push(r);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Airport markers (base layer — permanent)
+// ═══════════════════════════════════════════════════════
+function addAirportMarkers() {
+  const largeLayer  = L.layerGroup().addTo(map);
+  const mediumLayer = L.layerGroup().addTo(map);
+
+  for (const [iata, apt] of Object.entries(airports)) {
+    const isLarge = apt.t === 'L';
+    const color   = isLarge ? '#2563eb' : '#94a3b8';
+    const radius  = isLarge ? 5 : 3;
+
+    const marker = L.circleMarker([apt.la, apt.lo], {
+      radius,
+      color,
+      fillColor: color,
+      fillOpacity: 0.7,
+      weight: 1,
+      opacity: 0.9,
+    });
+
+    marker.bindTooltip(`<b>${iata}</b> — ${apt.n}<br>${apt.c}, ${apt.co}`, {
+      sticky: true,
+      direction: 'top',
+      className: 'apt-tooltip',
+    });
+
+    marker.on('click', (e) => handleAirportClick(iata, e.originalEvent));
+
+    if (isLarge) largeLayer.addLayer(marker);
+    else mediumLayer.addLayer(marker);
+
+    airportMarkerMap.set(iata, marker);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Clear overlays
+// ═══════════════════════════════════════════════════════
+function clearOverlays() {
+  for (const lg of Object.values(layers)) lg.clearLayers();
+}
+
+// ═══════════════════════════════════════════════════════
+//  Draw: origins phase
+// ═══════════════════════════════════════════════════════
+function drawOriginRoutes() {
+  const origs = [...state.origins];
+  if (origs.length === 0) return;
+
+  // Gold origin highlights
+  for (const iata of origs) {
+    const apt = airports[iata];
+    if (!apt) continue;
+    L.circleMarker([apt.la, apt.lo], {
+      radius: 8, color: '#fbbf24', fillColor: '#fbbf24',
+      fillOpacity: 1, weight: 2,
+    }).addTo(layers.originHighlight);
+  }
+
+  // Collect all destinations reachable from any origin
+  // dest IATA → {lat, lng, minKm, minMn, originIATAs[], routesList[]}
+  const destMap = new Map();
+
+  for (const oIATA of origs) {
+    const oApt = airports[oIATA];
+    if (!oApt) continue;
+    const oRoutes = routesByOrigin.get(oIATA) || [];
+    for (const r of oRoutes) {
+      const dApt = airports[r.de];
+      if (!dApt) continue;
+      if (state.origins.has(r.de)) continue; // skip other origins
+
+      if (!destMap.has(r.de)) {
+        destMap.set(r.de, { minKm: r.km, minMn: r.mn, origins: new Set(), routesList: [] });
+      }
+      const d = destMap.get(r.de);
+      if (r.km < d.minKm) { d.minKm = r.km; d.minMn = r.mn; }
+      d.origins.add(oIATA);
+      d.routesList.push(r);
+    }
+  }
+
+  // Draw lines origin → each unique dest (one per dest, from closest origin)
+  const drawnLines = new Set();
+  for (const [dIATA, info] of destMap) {
+    const dApt = airports[dIATA];
+    if (!dApt) continue;
+    for (const oIATA of info.origins) {
+      const key = `${oIATA}→${dIATA}`;
+      if (drawnLines.has(key)) continue;
+      drawnLines.add(key);
+      const oApt = airports[oIATA];
+      L.polyline([[oApt.la, oApt.lo], [dApt.la, dApt.lo]], {
+        color: '#fbbf24', weight: 1.2, opacity: 0.35,
+      }).addTo(layers.routesLeg1);
+    }
+  }
+
+  // Draw orange destination markers (clickable → transitions to destinations phase)
+  for (const [dIATA, info] of destMap) {
+    const dApt = airports[dIATA];
+    if (!dApt) continue;
+
+    const airlineNames = [...new Set(info.routesList.map(r => `${airlines[r.al] || r.al} (${r.al})`))].sort();
+    const origList = [...info.origins].join(', ');
+    const timeStr  = fmtTime(info.minMn);
+
+    const marker = L.circleMarker([dApt.la, dApt.lo], {
+      radius: 5, color: '#f97316', fillColor: '#f97316',
+      fillOpacity: 0.8, weight: 1,
+    });
+    marker.bindTooltip(
+      `<b>${dIATA}</b> — ${dApt.n}<br>${dApt.c}, ${dApt.co}<br>${info.minKm} km${timeStr ? ' · ' + timeStr : ''}<br>From: ${origList}`,
+      { sticky: true, direction: 'top' }
+    );
+    marker.on('click', (e) => handleAirportClick(dIATA, e.originalEvent));
+    layers.destMarkers.addLayer(marker);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Draw: destinations phase
+// ═══════════════════════════════════════════════════════
+function drawConnections() {
+  const origs = [...state.origins];
+  const dests = [...state.destinations];
+  if (origs.length === 0 || dests.length === 0) return;
+
+  // Gold origin highlights
+  for (const iata of origs) {
+    const apt = airports[iata];
+    if (!apt) continue;
+    L.circleMarker([apt.la, apt.lo], {
+      radius: 9, color: '#fbbf24', fillColor: '#fbbf24',
+      fillOpacity: 1, weight: 2,
+    }).addTo(layers.originHighlight);
+  }
+
+  // Orange destination highlights
+  for (const iata of dests) {
+    const apt = airports[iata];
+    if (!apt) continue;
+    L.circleMarker([apt.la, apt.lo], {
+      radius: 9, color: '#f97316', fillColor: '#f97316',
+      fillOpacity: 1, weight: 2,
+    }).addTo(layers.destHighlight);
+  }
+
+  // Compute via airports
+  const fromOrigins = new Set();
+  for (const oIATA of origs) {
+    for (const r of (routesByOrigin.get(oIATA) || [])) {
+      fromOrigins.add(r.de);
+    }
+  }
+  const toDests = new Set();
+  for (const dIATA of dests) {
+    for (const r of (routesByDest.get(dIATA) || [])) {
+      toDests.add(r.or);
+    }
+  }
+  const viaSet = new Set();
+  for (const v of fromOrigins) {
+    if (toDests.has(v) && !state.origins.has(v) && !state.destinations.has(v)) {
+      viaSet.add(v);
+    }
+  }
+
+  if (viaSet.size === 0) return;
+
+  for (const vIATA of viaSet) {
+    const vApt = airports[vIATA];
+    if (!vApt) continue;
+
+    const leg1Routes = [];
+    for (const oIATA of origs) {
+      for (const r of (routesByOrigin.get(oIATA) || [])) {
+        if (r.de === vIATA) leg1Routes.push(r);
+      }
+    }
+    const leg2Routes = [];
+    for (const dIATA of dests) {
+      for (const r of (routesByDest.get(dIATA) || [])) {
+        if (r.or === vIATA) leg2Routes.push(r);
+      }
+    }
+
+    // Draw leg1 lines (gold): origin → via
+    const drawnLeg1 = new Set();
+    for (const r of leg1Routes) {
+      const key = `${r.or}→${vIATA}`;
+      if (drawnLeg1.has(key)) continue;
+      drawnLeg1.add(key);
+      const oApt = airports[r.or];
+      if (!oApt) continue;
+      L.polyline([[oApt.la, oApt.lo], [vApt.la, vApt.lo]], {
+        color: '#fbbf24', weight: 1.5, opacity: 0.4,
+      }).addTo(layers.routesLeg1);
+    }
+
+    // Draw leg2 lines (orange): via → destination
+    const drawnLeg2 = new Set();
+    for (const r of leg2Routes) {
+      const key = `${vIATA}→${r.de}`;
+      if (drawnLeg2.has(key)) continue;
+      drawnLeg2.add(key);
+      const dApt = airports[r.de];
+      if (!dApt) continue;
+      L.polyline([[vApt.la, vApt.lo], [dApt.la, dApt.lo]], {
+        color: '#f97316', weight: 1.5, opacity: 0.4,
+      }).addTo(layers.routesLeg2);
+    }
+
+    // Purple connection marker
+    const isPinned = state.pinned.has(vIATA);
+    const marker = L.circleMarker([vApt.la, vApt.lo], {
+      radius: 6,
+      color: isPinned ? '#d946ef' : '#a855f7',
+      fillColor: isPinned ? '#d946ef' : '#a855f7',
+      fillOpacity: 0.9, weight: isPinned ? 2 : 1,
+    });
+    marker.bindTooltip(
+      `<b>Via ${vIATA}</b> — ${vApt.n}<br>${vApt.c}, ${vApt.co}<br><i>${isPinned ? 'Ctrl+click to unpin' : 'Click to pin details'}</i>`,
+      { sticky: true, direction: 'top' }
+    );
+    marker.on('click', (e) => handleViaClick(vIATA, e.originalEvent));
+    layers.connections.addLayer(marker);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Redraw
+// ═══════════════════════════════════════════════════════
+function redraw() {
+  clearOverlays();
+  if (state.phase === 'origins') {
+    drawOriginRoutes();
+  } else if (state.phase === 'destinations') {
+    drawConnections();
+  }
+  updateReport();
+  updateStatus();
+}
+
+// ═══════════════════════════════════════════════════════
+//  Click handlers
+// ═══════════════════════════════════════════════════════
+function handleAirportClick(iata, evt) {
+  const ctrl = state.ctrlDown || evt.ctrlKey || evt.metaKey;
+
+  if (state.phase === 'idle') {
+    state.origins.add(iata);
+    state.phase = 'origins';
+    state.pinned.clear();
+    redraw();
+
+  } else if (state.phase === 'origins') {
+    if (ctrl) {
+      if (state.origins.has(iata)) {
+        state.origins.delete(iata);
+      } else {
+        state.origins.add(iata);
+      }
+      if (state.origins.size === 0) {
+        state.phase = 'idle';
+        clearOverlays();
+        updateReport();
+        updateStatus();
+      } else {
+        redraw();
+      }
+    } else {
+      // Normal click
+      if (state.origins.has(iata)) {
+        // Clicking an existing origin — keep just this one, stay in origins
+        state.origins = new Set([iata]);
+        state.destinations.clear();
+        state.pinned.clear();
+        redraw();
+      } else {
+        // Click on a non-origin → enter destinations phase
+        state.destinations.add(iata);
+        state.phase = 'destinations';
+        state.pinned.clear();
+        redraw();
+      }
+    }
+
+  } else if (state.phase === 'destinations') {
+    if (ctrl) {
+      if (state.origins.has(iata)) {
+        state.origins.delete(iata);
+        if (state.origins.size === 0) {
+          state.phase = 'idle';
+          state.destinations.clear();
+          state.pinned.clear();
+          clearOverlays();
+          updateReport();
+          updateStatus();
+        } else {
+          redraw();
+        }
+      } else {
+        // Toggle destination
+        if (state.destinations.has(iata)) {
+          state.destinations.delete(iata);
+        } else {
+          state.destinations.add(iata);
+        }
+        if (state.destinations.size === 0) {
+          state.phase = 'origins';
+          state.pinned.clear();
+          redraw();
+        } else {
+          redraw();
+        }
+      }
+    } else {
+      // Normal click → restart with new origin
+      state.origins = new Set([iata]);
+      state.destinations.clear();
+      state.pinned.clear();
+      state.phase = 'origins';
+      redraw();
+    }
+  }
+
+  // Stop propagation so map click doesn't also fire
+  if (evt && evt.stopPropagation) evt.stopPropagation();
+}
+
+function handleViaClick(vIATA, evt) {
+  const ctrl = state.ctrlDown || evt.ctrlKey || evt.metaKey;
+  if (ctrl) {
+    state.pinned.delete(vIATA);
+  } else {
+    state.pinned.add(vIATA);
+  }
+  redraw();
+  if (evt && evt.stopPropagation) evt.stopPropagation();
+}
+
+// ═══════════════════════════════════════════════════════
+//  Helpers
+// ═══════════════════════════════════════════════════════
+function fmtTime(mins) {
+  if (!mins || mins === null || !isFinite(mins)) return '';
+  const h = Math.floor(mins / 60);
+  const m = String(mins % 60).padStart(2, '0');
+  return `~${h}h${m}m`;
+}
+
+function aptLabel(iata) {
+  const a = airports[iata];
+  return a ? `${a.c} (${iata})` : iata;
+}
+
+function esc(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// Aggregate routes by origin or dest key, returning array of {iata, km, mn, airlines}
+function aggByOrigin(routeList) {
+  // group by r.or
+  const m = new Map();
+  for (const r of routeList) {
+    if (!m.has(r.or)) m.set(r.or, { km: r.km, mn: r.mn, als: new Set() });
+    const e = m.get(r.or);
+    if (r.km < e.km) { e.km = r.km; e.mn = r.mn; }
+    const name = airlines[r.al] ? `${airlines[r.al]} (${r.al})` : r.al;
+    e.als.add(name);
+  }
+  return [...m.entries()].map(([iata, v]) => ({
+    iata,
+    km: v.km,
+    mn: v.mn,
+    alsStr: [...v.als].sort().join(', '),
+  }));
+}
+
+function aggByDest(routeList) {
+  // group by r.de
+  const m = new Map();
+  for (const r of routeList) {
+    if (!m.has(r.de)) m.set(r.de, { km: r.km, mn: r.mn, als: new Set() });
+    const e = m.get(r.de);
+    if (r.km < e.km) { e.km = r.km; e.mn = r.mn; }
+    const name = airlines[r.al] ? `${airlines[r.al]} (${r.al})` : r.al;
+    e.als.add(name);
+  }
+  return [...m.entries()].map(([iata, v]) => ({
+    iata,
+    km: v.km,
+    mn: v.mn,
+    alsStr: [...v.als].sort().join(', '),
+  }));
+}
+
+// ═══════════════════════════════════════════════════════
+//  Report generation
+// ═══════════════════════════════════════════════════════
+function buildReport() {
+  const origs = [...state.origins];
+  const dests = [...state.destinations];
+
+  if (state.phase === 'idle') {
+    state.reportText = '';
+    return { html: `<span class="r-dim">Select airports to generate a report.</span>`, text: '' };
+  }
+
+  if (state.phase === 'origins') {
+    return buildOriginsReport(origs);
+  }
+
+  return buildDestinationsReport(origs, dests);
+}
+
+function buildOriginsReport(origs) {
+  const oLabels = origs.map(aptLabel).join(' + ');
+
+  // Collect all destinations
+  const destAgg = new Map(); // dest IATA → {city, country, km, mn, origins Set, als Set}
+  for (const oIATA of origs) {
+    for (const r of (routesByOrigin.get(oIATA) || [])) {
+      if (state.origins.has(r.de)) continue;
+      const dApt = airports[r.de];
+      if (!dApt) continue;
+      if (!destAgg.has(r.de)) {
+        destAgg.set(r.de, { city: dApt.c, country: dApt.co, km: r.km, mn: r.mn, als: new Set() });
+      }
+      const e = destAgg.get(r.de);
+      if (r.km < e.km) { e.km = r.km; e.mn = r.mn; }
+      const alName = airlines[r.al] ? `${airlines[r.al]} (${r.al})` : r.al;
+      e.als.add(alName);
+    }
+  }
+
+  // Sort by country then city
+  const sorted = [...destAgg.entries()].sort((a, b) => {
+    const cmp = a[1].country.localeCompare(b[1].country);
+    return cmp !== 0 ? cmp : a[1].city.localeCompare(b[1].city);
+  });
+
+  const lines = [
+    `DESTINATIONS FROM: ${oLabels}`,
+    `${sorted.length} destinations`,
+    '─'.repeat(50),
+  ];
+
+  let htmlParts = `<div class="r-summary">Destinations from: <span class="sel-gold">${esc(oLabels)}</span><br>${sorted.length} destinations</div>`;
+
+  let currentCountry = '';
+  for (const [dIATA, info] of sorted) {
+    if (info.country !== currentCountry) {
+      currentCountry = info.country;
+      lines.push('', `▸ ${currentCountry}`);
+      htmlParts += `<div class="r-country">▸ ${esc(currentCountry)}</div>`;
+    }
+    const t = fmtTime(info.mn);
+    const als = [...info.als].sort().join(', ');
+    const line = `  ${dIATA} ${info.city} (${info.km}km${t ? ' ' + t : ''}) [${als}]`;
+    lines.push(line);
+    htmlParts += `<div>${esc(line)}</div>`;
+  }
+
+  const text = lines.join('\n');
+  state.reportText = text;
+  return { html: htmlParts, text };
+}
+
+function buildDestinationsReport(origs, dests) {
+  const oLabels = origs.map(aptLabel).join(' + ');
+  const dLabels = dests.map(aptLabel).join(' + ');
+
+  // Compute via airports
+  const fromOrigins = new Set();
+  for (const oIATA of origs) {
+    for (const r of (routesByOrigin.get(oIATA) || [])) fromOrigins.add(r.de);
+  }
+  const toDests = new Set();
+  for (const dIATA of dests) {
+    for (const r of (routesByDest.get(dIATA) || [])) toDests.add(r.or);
+  }
+  const viaSet = new Set();
+  for (const v of fromOrigins) {
+    if (toDests.has(v) && !state.origins.has(v) && !state.destinations.has(v)) viaSet.add(v);
+  }
+
+  // Direct routes
+  const directRoutes = [];
+  for (const oIATA of origs) {
+    for (const r of (routesByOrigin.get(oIATA) || [])) {
+      if (state.destinations.has(r.de)) directRoutes.push(r);
+    }
+  }
+
+  const hasDirect = directRoutes.length > 0;
+
+  const lines = [
+    `CONNECTIONS: ${oLabels} → ${dLabels}`,
+    `${viaSet.size} connecting airports${hasDirect ? ' (+ direct)' : ''}`,
+    '─'.repeat(50),
+  ];
+
+  let htmlParts = `<div class="r-summary">
+    <span class="sel-gold">${esc(oLabels)}</span> → <span class="sel-orange">${esc(dLabels)}</span><br>
+    ${viaSet.size} connecting airports${hasDirect ? ' (+ direct)' : ''}
+  </div>`;
+
+  // Direct flights section
+  if (hasDirect) {
+    lines.push('', '★ DIRECT FLIGHTS');
+    htmlParts += `<div class="r-direct">★ DIRECT FLIGHTS</div>`;
+
+    // Aggregate: per (origin, dest) pair
+    const directAgg = new Map();
+    for (const r of directRoutes) {
+      const key = `${r.or}→${r.de}`;
+      if (!directAgg.has(key)) directAgg.set(key, { or: r.or, de: r.de, km: r.km, mn: r.mn, als: new Set() });
+      const e = directAgg.get(key);
+      if (r.km < e.km) { e.km = r.km; e.mn = r.mn; }
+      const alName = airlines[r.al] ? `${airlines[r.al]} (${r.al})` : r.al;
+      e.als.add(alName);
+    }
+    for (const [, d] of directAgg) {
+      const t = fmtTime(d.mn);
+      const als = [...d.als].sort().join(', ');
+      const line = `  ${d.or} → ${d.de} (${d.km}km${t ? ' ' + t : ''}) [${als}]`;
+      lines.push(line);
+      htmlParts += `<div>${esc(line)}</div>`;
+    }
+  }
+
+  // Sort via airports by country then city
+  const viaSorted = [...viaSet].map(v => {
+    const a = airports[v] || { c: '', co: '' };
+    return { iata: v, city: a.c, country: a.co };
+  }).sort((a, b) => {
+    const cmp = a.country.localeCompare(b.country);
+    return cmp !== 0 ? cmp : a.city.localeCompare(b.city);
+  });
+
+  // Separate pinned vs non-pinned
+  const pinnedVia = viaSorted.filter(v => state.pinned.has(v.iata));
+  const unpinnedVia = viaSorted.filter(v => !state.pinned.has(v.iata));
+
+  // Render pinned connections (expanded) at top
+  if (pinnedVia.length > 0) {
+    lines.push('', 'PINNED CONNECTIONS');
+    htmlParts += `<div class="r-sect-hdr" style="margin-top:10px;">PINNED CONNECTIONS</div>`;
+
+    for (const v of pinnedVia) {
+      const vApt = airports[v.iata] || { n: v.iata, c: '', co: '' };
+      const leg1 = [];
+      for (const oIATA of origs) {
+        for (const r of (routesByOrigin.get(oIATA) || [])) {
+          if (r.de === v.iata) leg1.push(r);
+        }
+      }
+      const leg2 = [];
+      for (const dIATA of dests) {
+        for (const r of (routesByDest.get(dIATA) || [])) {
+          if (r.or === v.iata) leg2.push(r);
+        }
+      }
+      const inbound  = aggByOrigin(leg1);
+      const outbound = aggByDest(leg2);
+
+      lines.push('', `[PINNED] ${v.iata} — ${vApt.n}`, `  ${v.city}, ${v.country}`);
+      htmlParts += `<div class="r-pinned">
+        <div class="r-pinned-hdr">📍 ${esc(v.iata)} — ${esc(vApt.n)}<span style="color:#64748b;font-weight:400"> · ${esc(v.city)}, ${esc(v.country)}</span></div>`;
+
+      for (const ib of inbound) {
+        const t = fmtTime(ib.mn);
+        const l = `    ← ${ib.iata} (${ib.km}km${t ? ' ' + t : ''}) ${ib.alsStr}`;
+        lines.push(l);
+        htmlParts += `<div class="r-inbound">${esc(l)}</div>`;
+      }
+      for (const ob of outbound) {
+        const t = fmtTime(ob.mn);
+        const l = `    → ${ob.iata} (${ob.km}km${t ? ' ' + t : ''}) ${ob.alsStr}`;
+        lines.push(l);
+        htmlParts += `<div class="r-outbound">${esc(l)}</div>`;
+      }
+      htmlParts += `</div>`;
+    }
+  }
+
+  // All connections (compact, grouped by country)
+  if (viaSorted.length > 0) {
+    lines.push('', 'CONNECTING AIRPORTS');
+    htmlParts += `<div class="r-sect-hdr" style="margin-top:10px;">CONNECTING AIRPORTS</div>`;
+
+    let currentCountry = '';
+    for (const v of viaSorted) {
+      if (v.country !== currentCountry) {
+        currentCountry = v.country;
+        lines.push('', `▸ ${currentCountry}`);
+        htmlParts += `<div class="r-country">▸ ${esc(currentCountry)}</div>`;
+      }
+      const vApt = airports[v.iata] || { n: v.iata };
+      const isPinned = state.pinned.has(v.iata);
+      const pin = isPinned ? ' 📍' : '';
+
+      const leg1 = [];
+      for (const oIATA of origs) {
+        for (const r of (routesByOrigin.get(oIATA) || [])) {
+          if (r.de === v.iata) leg1.push(r);
+        }
+      }
+      const leg2 = [];
+      for (const dIATA of dests) {
+        for (const r of (routesByDest.get(dIATA) || [])) {
+          if (r.or === v.iata) leg2.push(r);
+        }
+      }
+      const inbound  = aggByOrigin(leg1);
+      const outbound = aggByDest(leg2);
+
+      lines.push(`  ${v.iata} ${v.city}`);
+      htmlParts += `<div class="r-via">${esc(v.iata)} ${esc(v.city)}${pin}</div>`;
+
+      for (const ib of inbound) {
+        const t = fmtTime(ib.mn);
+        const l = `    ← ${ib.iata} (${ib.km}km${t ? ' ' + t : ''}) ${ib.alsStr}`;
+        lines.push(l);
+        htmlParts += `<div class="r-inbound">${esc(l)}</div>`;
+      }
+      for (const ob of outbound) {
+        const t = fmtTime(ob.mn);
+        const l = `    → ${ob.iata} (${ob.km}km${t ? ' ' + t : ''}) ${ob.alsStr}`;
+        lines.push(l);
+        htmlParts += `<div class="r-outbound">${esc(l)}</div>`;
+      }
+    }
+  }
+
+  const text = lines.join('\n');
+  state.reportText = text;
+  return { html: htmlParts, text };
+}
+
+// ═══════════════════════════════════════════════════════
+//  Update DOM
+// ═══════════════════════════════════════════════════════
+function updateReport() {
+  const { html } = buildReport();
+  document.getElementById('report-body').innerHTML = html;
+}
+
+function updateStatus() {
+  const el = document.getElementById('status-text');
+  const origs = [...state.origins];
+  const dests  = [...state.destinations];
+
+  if (state.phase === 'idle') {
+    const nApt = Object.keys(airports).length;
+    const nRt  = routes.length.toLocaleString();
+    el.innerHTML = `${nApt} airports, ${nRt} routes <span class="hint">· Click airport · Ctrl+click to multi-select</span>`;
+
+  } else if (state.phase === 'origins') {
+    const oLabels = origs.map(aptLabel).join(' + ');
+    // Count unique destinations
+    const destSet = new Set();
+    for (const oIATA of origs) {
+      for (const r of (routesByOrigin.get(oIATA) || [])) {
+        if (!state.origins.has(r.de)) destSet.add(r.de);
+      }
+    }
+    el.innerHTML = `<span class="sel-gold">${esc(oLabels)}</span> — ${destSet.size} destinations <span class="hint">· Ctrl+click: +/- origin · Click dest for connections</span>`;
+
+  } else {
+    const oLabels = origs.map(aptLabel).join(' + ');
+    const dLabels = dests.map(aptLabel).join(' + ');
+    const fromOrigins = new Set();
+    for (const oIATA of origs) {
+      for (const r of (routesByOrigin.get(oIATA) || [])) fromOrigins.add(r.de);
+    }
+    const toDests = new Set();
+    for (const dIATA of dests) {
+      for (const r of (routesByDest.get(dIATA) || [])) toDests.add(r.or);
+    }
+    let nVia = 0;
+    for (const v of fromOrigins) {
+      if (toDests.has(v) && !state.origins.has(v) && !state.destinations.has(v)) nVia++;
+    }
+    let hasDirect = false;
+    for (const oIATA of origs) {
+      for (const r of (routesByOrigin.get(oIATA) || [])) {
+        if (state.destinations.has(r.de)) { hasDirect = true; break; }
+      }
+      if (hasDirect) break;
+    }
+    const directTxt = hasDirect ? ' (+ direct)' : '';
+    el.innerHTML = `<span class="sel-gold">${esc(oLabels)}</span> → <span class="sel-orange">${esc(dLabels)}</span> — ${nVia} connecting${directTxt} <span class="hint">· Ctrl+click: +/- · Click to restart</span>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Ctrl key tracking
+// ═══════════════════════════════════════════════════════
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Control' || e.key === 'Meta') state.ctrlDown = true;
+});
+document.addEventListener('keyup', (e) => {
+  if (e.key === 'Control' || e.key === 'Meta') state.ctrlDown = false;
+});
+// Safety: reset on focus loss
+window.addEventListener('blur', () => { state.ctrlDown = false; });
+
+// ═══════════════════════════════════════════════════════
+//  Button handlers
+// ═══════════════════════════════════════════════════════
+document.getElementById('btn-clear').addEventListener('click', () => {
+  state.origins.clear();
+  state.destinations.clear();
+  state.pinned.clear();
+  state.phase = 'idle';
+  clearOverlays();
+  updateReport();
+  updateStatus();
+});
+
+document.getElementById('btn-copy').addEventListener('click', () => {
+  if (!state.reportText) return;
+  navigator.clipboard.writeText(state.reportText).then(() => {
+    const btn = document.getElementById('btn-copy');
+    btn.style.background = '#22c55e';
+    btn.textContent = 'Copied!';
+    setTimeout(() => {
+      btn.style.background = '#7c3aed';
+      btn.textContent = 'Copy Report';
+    }, 1500);
+  }).catch(err => {
+    console.error('Clipboard write failed:', err);
+  });
+});
+
+// ═══════════════════════════════════════════════════════
+//  Bootstrap
+// ═══════════════════════════════════════════════════════
+async function init() {
+  const loadingEl  = document.getElementById('loading');
+  const loadingMsg = document.getElementById('loading-msg');
+  const appEl      = document.getElementById('app');
+
+  try {
+    loadingMsg.textContent = 'Loading route data…';
+    const resp = await fetch('data.json');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+    loadingMsg.textContent = 'Parsing data…';
+    const data = await resp.json();
+
+    airports = data.airports;
+    airlines = data.airlines;
+    routes   = data.routes.map(([al, or, de, km, mn]) => ({ al, or, de, km, mn }));
+
+    loadingMsg.textContent = 'Building indexes…';
+    // Yield to browser between heavy operations
+    await new Promise(r => setTimeout(r, 0));
+    buildIndexes();
+
+    loadingMsg.textContent = 'Rendering map…';
+    await new Promise(r => setTimeout(r, 0));
+
+    // Show app
+    loadingEl.style.display = 'none';
+    appEl.style.display = 'flex';
+    appEl.style.flexDirection = 'column';
+
+    initMap();
+    addAirportMarkers();
+    updateStatus();
+    updateReport();
+
+  } catch (err) {
+    loadingMsg.textContent = `Error: ${err.message}`;
+    loadingMsg.style.color = '#ef4444';
+    console.error(err);
+  }
+}
+
+init();
+</script>
+</body>
+</html>

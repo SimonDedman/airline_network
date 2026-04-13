@@ -1,42 +1,46 @@
 # airline_network
 
-A queryable SQLite database of global airline routes, built from open data sources.
+A queryable database of global airline routes with an interactive map explorer.
 
-## Setup
+**[Live demo](https://simondedman.github.io/airline_network/)** -- no install needed, runs in your browser.
+
+## Features
+
+- Interactive Leaflet map with 5,300+ airports and 90,000+ routes
+- Click airports to see all direct destinations
+- Multi-select origins and destinations (Ctrl+click) to find 1-stop connections
+- Pin connection airports for detailed inbound/outbound airline info
+- Copy connection reports to clipboard
+- Also available as a local Shiny app with SQLite backend
+
+## Live map
+
+Visit **https://simondedman.github.io/airline_network/** to use the browser version directly.
+
+## Local setup (R/Shiny)
 
 ```r
-install.packages(c("DBI", "RSQLite", "data.table", "curl", "here"))
+install.packages(c("DBI", "RSQLite", "data.table", "jsonlite", "curl", "here"))
 
-source("R/01_download_data.R")  # download data (~5 MB)
-source("R/02_build_database.R") # build SQLite database
+source("scripts/01_download_data.R")   # download airport data
+source("scripts/04_ingest_jonty.R")    # download routes + build SQLite database
+
+# Launch the Shiny app
+shiny::runApp("app.R")
 ```
 
-## Usage
+## R query helpers
 
 ```r
 source("R/03_query_helpers.R")
 db <- an_connect()
 
-# Search airports
 airport_search(db, "shannon")
-
-# Direct flights from Shannon
-routes_from(db, "SNN")
 routes_from(db, "SNN", europe = TRUE)
-
-# Ryanair destinations from Shannon
 routes_from(db, "SNN", airline = "FR")
-
-# Find routes Shannon to Athens (direct + 1-stop)
 connections(db, "SNN", "ATH")
-
-# Airlines operating from Dublin
 airlines_at(db, "DUB")
-
-# Countries reachable from Cork
 countries_from(db, "ORK", europe = TRUE)
-
-# Arbitrary SQL
 an_query(db, "SELECT * FROM europe_routes WHERE origin_iata = 'SNN'")
 
 an_disconnect(db)
@@ -46,8 +50,8 @@ an_disconnect(db)
 
 | Source | Coverage | Licence | Freshness |
 |--------|----------|---------|-----------|
+| [Jonty/airline-route-data](https://github.com/Jonty/airline-route-data) | 3,900 airports, 90K routes | Public GitHub | Updated weekly |
 | [OurAirports](https://ourairports.com/data/) | 78K+ airports | Public domain | Updated weekly |
-| [OpenFlights](https://openflights.org/data.php) | 67K routes, 6K airlines | ODbL | Routes frozen ~2014 |
 
 ## Licence
 

@@ -142,6 +142,7 @@ ui <- fluidPage(
       .report-body .leg-out { color: #f97316; }
       .report-body .direct-tag { color: #22c55e; font-weight: 600; }
       .report-body .dim { color: #64748b; }
+      .report-body .direct-tag { color: #22c55e; font-weight: 600; }
       .report-body .summary-line { color: #94a3b8; margin-bottom: 6px; }
 
       #copy_report {
@@ -181,6 +182,7 @@ server <- function(input, output, session) {
 
   origins      <- reactiveVal(character(0))
   destinations <- reactiveVal(character(0))
+  pinnedVia    <- reactiveVal(character(0))
   phase        <- reactiveVal("idle")
   report_text  <- reactiveVal("")  # plain text for clipboard
 
@@ -369,11 +371,16 @@ server <- function(input, output, session) {
         "<br><br><b>Onward:</b><br>", leg2_txt
       )
 
+      is_pinned <- v$iata_code %in% pinnedVia()
       proxy |> addCircleMarkers(
-        lng = v$longitude, lat = v$latitude, radius = 6,
-        color = "#a855f7", fillColor = "#a855f7",
-        fillOpacity = 0.9, weight = 1, stroke = TRUE,
-        popup = popup_html, group = "connections"
+        lng = v$longitude, lat = v$latitude,
+        radius = if (is_pinned) 8 else 6,
+        color = if (is_pinned) "#c084fc" else "#a855f7",
+        fillColor = if (is_pinned) "#c084fc" else "#a855f7",
+        fillOpacity = 0.9, weight = if (is_pinned) 2 else 1, stroke = TRUE,
+        popup = popup_html,
+        layerId = paste0("via_", v$iata_code),
+        group = "connections"
       )
     }
   }
@@ -526,20 +533,79 @@ server <- function(input, output, session) {
       }
     }
 
-    # Via airports, sorted by country then city
+    # Helper: build detail lines/html for one via airport
+    via_detail <- function(v) {
+      dl <- character(0); dh <- list()
+      leg1 <- routes[origin_iata %in% origs & dest_iata == v$iata_code]
+      leg2 <- routes[origin_iata == v$iata_code & dest_iata %in% dests_selected]
+
+      leg1_agg <- leg1[, .(
+        airlines = paste(sort(unique(paste0(airline_name, " (", airline_iata, ")"))),
+                         collapse = ", "),
+        km = distance_km[1], mins = flight_min[1]
+      ), by = origin_iata]
+      for (j in seq_len(nrow(leg1_agg))) {
+        r <- leg1_agg[j]
+        ts <- if (!is.na(r$mins)) paste0(" ", r$mins %/% 60, "h",
+              formatC(r$mins %% 60, width = 2, flag = "0"), "m") else ""
+        ln <- paste0("    \u2190 ", r$origin_iata, " (", r$km, "km", ts, ") ", r$airlines)
+        dl <- c(dl, ln)
+        dh <- c(dh, list(tags$div(class = "leg-in", ln)))
+      }
+
+      leg2_agg <- leg2[, .(
+        airlines = paste(sort(unique(paste0(airline_name, " (", airline_iata, ")"))),
+                         collapse = ", "),
+        km = distance_km[1], mins = flight_min[1]
+      ), by = dest_iata]
+      for (j in seq_len(nrow(leg2_agg))) {
+        r <- leg2_agg[j]
+        ts <- if (!is.na(r$mins)) paste0(" ", r$mins %/% 60, "h",
+              formatC(r$mins %% 60, width = 2, flag = "0"), "m") else ""
+        ln <- paste0("    \u2192 ", r$dest_iata, " (", r$km, "km", ts, ") ", r$airlines)
+        dl <- c(dl, ln)
+        dh <- c(dh, list(tags$div(class = "leg-out", ln)))
+      }
+      list(lines = dl, html = dh)
+    }
+
+    # Via airports
     if (length(via_airports) > 0) {
       via_dt <- apt_coords[iata_code %in% via_airports]
       setorder(via_dt, country, city)
+      pinned <- pinnedVia()
 
+      # Pinned connections (expanded, at top)
+      pinned_dt <- via_dt[iata_code %in% pinned]
+      if (nrow(pinned_dt) > 0) {
+        lines <- c(lines, "", "\U0001F4CD PINNED CONNECTIONS")
+        html_parts <- c(html_parts, list(
+          tags$div(style = "margin-top:8px; font-weight:700; color:#c084fc;",
+                   "\U0001F4CD PINNED CONNECTIONS")
+        ))
+        for (i in seq_len(nrow(pinned_dt))) {
+          v <- pinned_dt[i]
+          hdr <- paste0("  ", v$iata_code, " \u2014 ", v$name, " (", v$city, ", ", v$country, ")")
+          lines <- c(lines, hdr)
+          html_parts <- c(html_parts, list(
+            tags$div(style = "color:#c084fc; font-weight:600; margin-top:4px;", hdr)
+          ))
+          detail <- via_detail(v)
+          lines <- c(lines, detail$lines)
+          html_parts <- c(html_parts, detail$html)
+        }
+      }
+
+      # All connections grouped by country
       lines <- c(lines, "", "CONNECTING AIRPORTS")
       html_parts <- c(html_parts, list(
         tags$div(style = "margin-top:8px; font-weight:700;", "CONNECTING AIRPORTS")
       ))
 
       current_country <- ""
-
       for (i in seq_len(nrow(via_dt))) {
         v <- via_dt[i]
+        is_pinned <- v$iata_code %in% pinned
 
         if (v$country != current_country) {
           current_country <- v$country
@@ -549,57 +615,20 @@ server <- function(input, output, session) {
           ))
         }
 
-        leg1 <- routes[origin_iata %in% origs & dest_iata == v$iata_code]
-        leg2 <- routes[origin_iata == v$iata_code & dest_iata %in% dests_selected]
-
-        # Header line
-        via_line <- paste0("  ", v$iata_code, " ", v$city)
+        pin_mark <- if (is_pinned) " \U0001F4CD" else ""
+        via_line <- paste0("  ", v$iata_code, " ", v$city, pin_mark)
         lines <- c(lines, via_line)
         html_parts <- c(html_parts, list(
-          tags$div(style = "color:#a855f7; font-weight:600; margin-top:4px;",
-                   paste0("  ", v$iata_code, " ", v$city))
+          tags$div(style = paste0("color:#a855f7; font-weight:600; margin-top:4px;",
+                                  if (is_pinned) " border-left:2px solid #a855f7; padding-left:4px;" else ""),
+                   via_line)
         ))
 
-        # Inbound legs
-        leg1_agg <- leg1[, .(
-          airlines = paste(sort(unique(paste0(airline_name, " (", airline_iata, ")"))),
-                           collapse = ", "),
-          km = distance_km[1],
-          mins = flight_min[1]
-        ), by = origin_iata]
-        for (j in seq_len(nrow(leg1_agg))) {
-          r <- leg1_agg[j]
-          time_str <- if (!is.na(r$mins)) {
-            paste0(" ", r$mins %/% 60, "h", formatC(r$mins %% 60, width = 2, flag = "0"), "m")
-          } else ""
-          in_line <- paste0("    \u2190 ", r$origin_iata,
-                            " (", r$km, "km", time_str, ") ", r$airlines)
-          lines <- c(lines, in_line)
-          html_parts <- c(html_parts, list(
-            tags$div(class = "leg-in", paste0("    \u2190 ", r$origin_iata,
-              " (", r$km, "km", time_str, ") ", r$airlines))
-          ))
-        }
-
-        # Outbound legs
-        leg2_agg <- leg2[, .(
-          airlines = paste(sort(unique(paste0(airline_name, " (", airline_iata, ")"))),
-                           collapse = ", "),
-          km = distance_km[1],
-          mins = flight_min[1]
-        ), by = dest_iata]
-        for (j in seq_len(nrow(leg2_agg))) {
-          r <- leg2_agg[j]
-          time_str <- if (!is.na(r$mins)) {
-            paste0(" ", r$mins %/% 60, "h", formatC(r$mins %% 60, width = 2, flag = "0"), "m")
-          } else ""
-          out_line <- paste0("    \u2192 ", r$dest_iata,
-                             " (", r$km, "km", time_str, ") ", r$airlines)
-          lines <- c(lines, out_line)
-          html_parts <- c(html_parts, list(
-            tags$div(class = "leg-out", paste0("    \u2192 ", r$dest_iata,
-              " (", r$km, "km", time_str, ") ", r$airlines))
-          ))
+        # Show detail inline for pinned items
+        if (is_pinned) {
+          detail <- via_detail(v)
+          lines <- c(lines, detail$lines)
+          html_parts <- c(html_parts, detail$html)
         }
       }
     }
@@ -629,6 +658,16 @@ server <- function(input, output, session) {
     if (is.null(click$id)) return()
 
     click_id <- click$id
+
+    # Detect via-airport click (for pinning)
+    is_via_click <- startsWith(click_id, "via_")
+    if (is_via_click) {
+      via_code <- sub("^via_", "", click_id)
+      pinnedVia(toggle(pinnedVia(), via_code))
+      redraw()  # redraw to update marker styling
+      return()
+    }
+
     if (startsWith(click_id, "dest_")) {
       click_id <- sub("^dest_", "", click_id)
     }
@@ -639,6 +678,7 @@ server <- function(input, output, session) {
     if (cur_phase == "idle") {
       origins(click_id)
       destinations(character(0))
+      pinnedVia(character(0))
       phase("origins")
       redraw()
 
@@ -703,6 +743,7 @@ server <- function(input, output, session) {
   observeEvent(input$clear, {
     origins(character(0))
     destinations(character(0))
+    pinnedVia(character(0))
     phase("idle")
     clear_overlays()
   })
